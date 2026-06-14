@@ -7,8 +7,12 @@ retention timer; get_info just returns the cached, debounced presence.
 
   - "Presence" : binary_sensor (occupancy)
 
-sampling_frequency resets to 0 on reboot, so it is armed at startup. Requires write
-access to the IIO sysfs attributes (see the bundled udev rule).
+sampling_frequency resets to 0 on reboot, so it is (re)armed when the sensor is
+found. Discovery is lazy and retried in the background thread: at boot lnxlink can
+start before hid-sensor-prox has enumerated the IIO device, so the module must not
+fail hard then -- it keeps looking, arms the sensor once it appears, and re-discovers
+it if it later goes away. Requires write access to the IIO sysfs attributes (see the
+bundled udev rule).
 """
 import glob
 import logging
@@ -32,10 +36,15 @@ class Addon:
         self.poll_interval = float(settings.get("poll_interval", 0.2))
         self.retention = float(settings.get("retention", 180))
 
+        # Discover lazily: at boot lnxlink may start before hid-sensor-prox has
+        # enumerated the device. Don't fail hard (lnxlink would disable the module
+        # for the whole session) -- the watch thread keeps looking and arms it.
         self.dev = self._find_sensor()
-        if not self.dev:
-            raise SystemError("PIR 'prox' sensor not found (is hid-sensor-prox loaded?)")
-        self._arm()
+        if self.dev:
+            self._arm()
+        else:
+            logger.warning("PIR: 'prox' sensor not present yet -- will keep looking "
+                           "(hid-sensor-prox may not have enumerated at boot)")
 
         self._present = False
         self._stop = threading.Event()
@@ -81,10 +90,26 @@ class Addon:
             return None
 
     def _watch_loop(self):
-        """Poll at >=5 Hz, apply retention -> stable cached presence."""
+        """Poll at >=5 Hz, apply retention -> stable cached presence.
+
+        Also (re)discovers the sensor: if it was not ready at boot, or it goes away
+        (re-enumeration), keep looking and re-arm it once it is back.
+        """
         last_motion = 0.0
         while not self._stop.is_set():
+            if not self.dev:
+                self.dev = self._find_sensor()
+                if self.dev:
+                    logger.info("PIR: 'prox' sensor found -> %s", self.dev)
+                    self._arm()
+                else:
+                    self._present = False
+                    time.sleep(2.0)  # not ready yet, back off before retrying
+                    continue
             raw = self._read_raw()
+            if raw is None:           # sensor disappeared -> re-discover next loop
+                self.dev = None
+                continue
             now = time.monotonic()
             if raw == 1:
                 last_motion = now
