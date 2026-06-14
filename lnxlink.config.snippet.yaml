@@ -1,0 +1,31 @@
+# Snippet to merge into your lnxlink config (~/.config/lnxlink/config.yaml).
+# These keys add the four ThinkSmart Hub 500 custom modules and their options.
+#
+# Replace <YOUR_HOME> below with your own home directory: install.sh copies the
+# modules to "$HOME/.config/lnxlink/modules/". lnxlink expects absolute paths here,
+# so "~" is not expanded -- write the full path (e.g. /home/youruser/...).
+
+custom_modules:
+  - <YOUR_HOME>/.config/lnxlink/modules/tsh500_led.py
+  - <YOUR_HOME>/.config/lnxlink/modules/tsh500_screen.py
+  - <YOUR_HOME>/.config/lnxlink/modules/tsh500_volume.py
+  - <YOUR_HOME>/.config/lnxlink/modules/tsh500_presence.py
+
+# Per-module options (all optional -- shown with their defaults).
+settings:
+  tsh500_screen:
+    i2c_bus: "5"          # AUO panel bus (/dev/i2c-5)
+  tsh500_volume:
+    # The sink is found by its USB vendor:product id (read from the sink properties),
+    # which is unique to the Hub card and cannot collide with a generic "USB Audio"
+    # dock/DAC/headset. Defaults below match the Hub 500; only change them if needed.
+    vendor_id: "17ef"
+    product_id: "a017"
+    # Optional fallback only -- a substring of the PipeWire sink NAME, used if the id
+    # match fails. Left empty by default on purpose (an empty value never matches, so
+    # no wrong device can be picked). Inspect names with: pactl list short sinks
+    sink_match: ""
+  tsh500_presence:
+    sampling_hz: 5        # IIO sampling frequency (armed at startup)
+    poll_interval: 0.2    # background read period (s) -- >=5 Hz to catch motion
+    retention: 180        # keep presence ON for N s after the last motion

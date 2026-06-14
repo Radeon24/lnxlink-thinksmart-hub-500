@@ -1,0 +1,92 @@
+"""Custom lnxlink module -- ThinkSmart Hub 500 PIR presence sensor.
+
+The PIR sensor (17ef:60c0) is exposed via IIO (hid-sensor-prox). It reports MOTION
+as short pulses (~0.5 s), which lnxlink's periodic get_info poll would miss. A
+background thread therefore polls the IIO raw value at >=5 Hz and applies a
+retention timer; get_info just returns the cached, debounced presence.
+
+  - "Presence" : binary_sensor (occupancy)
+
+sampling_frequency resets to 0 on reboot, so it is armed at startup. Requires write
+access to the IIO sysfs attributes (see the bundled udev rule).
+"""
+import glob
+import logging
+import threading
+import time
+
+logger = logging.getLogger("lnxlink")
+
+IIO_GLOB = "/sys/bus/iio/devices/iio:device*"
+
+
+class Addon:
+    """Presence addon."""
+
+    def __init__(self, lnxlink):
+        """Setup addon."""
+        self.name = "TSH500 Presence"
+        self.lnxlink = lnxlink
+        settings = lnxlink.config.get("settings", {}).get("tsh500_presence", {})
+        self.sampling_hz = int(settings.get("sampling_hz", 5))
+        self.poll_interval = float(settings.get("poll_interval", 0.2))
+        self.retention = float(settings.get("retention", 180))
+
+        self.dev = self._find_sensor()
+        if not self.dev:
+            raise SystemError("PIR 'prox' sensor not found (is hid-sensor-prox loaded?)")
+        self._arm()
+
+        self._present = False
+        self._stop = threading.Event()
+        threading.Thread(target=self._watch_loop, daemon=True).start()
+
+    def exposed_controls(self):
+        """Exposes to home assistant."""
+        return {
+            "Presence": {
+                "type": "binary_sensor",
+                "icon": "mdi:motion-sensor",
+                "device_class": "occupancy",
+            }
+        }
+
+    def get_info(self):
+        """Gather information from the system."""
+        return "ON" if self._present else "OFF"
+
+    # --- internals ---
+    def _find_sensor(self):
+        for d in glob.glob(IIO_GLOB):
+            try:
+                if open(f"{d}/name").read().strip() == "prox":
+                    return d
+            except OSError:
+                continue
+        return None
+
+    def _arm(self):
+        """Enable sampling (raw stays frozen otherwise). Best-effort."""
+        try:
+            with open(f"{self.dev}/in_proximity0_sampling_frequency", "w") as f:
+                f.write(str(self.sampling_hz))
+        except OSError as err:
+            logger.warning("PIR: cannot arm sensor (%s) -- sysfs permissions?", err)
+
+    def _read_raw(self):
+        try:
+            with open(f"{self.dev}/in_proximity0_raw") as f:
+                return int(f.read().strip())
+        except OSError:
+            return None
+
+    def _watch_loop(self):
+        """Poll at >=5 Hz, apply retention -> stable cached presence."""
+        last_motion = 0.0
+        while not self._stop.is_set():
+            raw = self._read_raw()
+            now = time.monotonic()
+            if raw == 1:
+                last_motion = now
+            self._present = (raw == 1) or (now - last_motion < self.retention)
+            time.sleep(self.poll_interval)
