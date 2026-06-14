@@ -39,6 +39,8 @@ class Addon:
         # Discover lazily: at boot lnxlink may start before hid-sensor-prox has
         # enumerated the device. Don't fail hard (lnxlink would disable the module
         # for the whole session) -- the watch thread keeps looking and arms it.
+        self.attr_raw = None
+        self.attr_freq = None
         self.dev = self._find_sensor()
         if self.dev:
             self._arm()
@@ -69,22 +71,38 @@ class Addon:
         for d in glob.glob(IIO_GLOB):
             try:
                 if open(f"{d}/name").read().strip() == "prox":
+                    self._resolve_attrs(d)
                     return d
             except OSError:
                 continue
         return None
 
+    def _resolve_attrs(self, dev):
+        """Resolve the sysfs attribute paths. Kernels differ in how they name the
+        IIO channel: older ones index it (in_proximity0_raw), newer ones don't
+        (in_proximity_raw). Match both with a glob so the module is kernel-agnostic.
+        """
+        raw = sorted(glob.glob(f"{dev}/in_proximity*_raw"))
+        freq = sorted(glob.glob(f"{dev}/in_proximity*_sampling_frequency"))
+        self.attr_raw = raw[0] if raw else None
+        self.attr_freq = freq[0] if freq else None
+
     def _arm(self):
         """Enable sampling (raw stays frozen otherwise). Best-effort."""
+        if not self.attr_freq:
+            logger.warning("PIR: no sampling_frequency attribute found -- cannot arm")
+            return
         try:
-            with open(f"{self.dev}/in_proximity0_sampling_frequency", "w") as f:
+            with open(self.attr_freq, "w") as f:
                 f.write(str(self.sampling_hz))
         except OSError as err:
             logger.warning("PIR: cannot arm sensor (%s) -- sysfs permissions?", err)
 
     def _read_raw(self):
+        if not self.attr_raw:
+            return None
         try:
-            with open(f"{self.dev}/in_proximity0_raw") as f:
+            with open(self.attr_raw) as f:
                 return int(f.read().strip())
         except OSError:
             return None
@@ -109,6 +127,7 @@ class Addon:
             raw = self._read_raw()
             if raw is None:           # sensor disappeared -> re-discover next loop
                 self.dev = None
+                time.sleep(self.poll_interval)  # avoid a tight re-discovery loop
                 continue
             now = time.monotonic()
             if raw == 1:

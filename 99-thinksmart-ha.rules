@@ -10,7 +10,7 @@ SUBSYSTEM=="usb", ATTR{idVendor}=="17ef", ATTR{idProduct}=="a017", MODE="0660", 
 # PIR sensor exposed via IIO (hid-sensor-prox) -- make sampling_frequency/raw
 # group-writable (its name is "prox").
 SUBSYSTEM=="iio", KERNEL=="iio:device*", ATTR{name}=="prox", MODE="0664", GROUP="plugdev", TAG+="uaccess", \
-  RUN+="/bin/sh -c 'chgrp -R plugdev /sys%p/ 2>/dev/null; chmod -R g+rw /sys%p/in_proximity0_sampling_frequency /sys%p/in_proximity0_raw 2>/dev/null'"
+  RUN+="/bin/sh -c 'chgrp -R plugdev /sys%p/ 2>/dev/null; chmod g+rw /sys%p/in_proximity*_sampling_frequency /sys%p/in_proximity*_raw 2>/dev/null'"
 
 # Screen: DDC access goes through /dev/i2c-5 (i2c group, handled by i2c-tools rules).
 # Make sure the user is in the i2c group (see install.sh).
