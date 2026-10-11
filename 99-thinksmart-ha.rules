@@ -1,11 +1,20 @@
 # udev rules for the ThinkSmart Hub 500 lnxlink custom modules.
 # Grant the session user device access without root:
-#   - USB 17ef:a017 (LED controller, vendor ep0 transfers)
+#   - USB 17ef:a017 or 17ef:a024 (LED controller, vendor ep0 transfers)
+#   - hidraw on that composite (HID iface 5) for LED priming Feature Reports
 #   - PIR IIO attributes (arming sampling_frequency)
 # Install into /etc/udev/rules.d/ then: udevadm control --reload && udevadm trigger
 
 # USB card / LED controller -- usbfs node access (no interface detach)
+# Some Hub 500 units enumerate the composite as a024 instead of a017 (#1).
 SUBSYSTEM=="usb", ATTR{idVendor}=="17ef", ATTR{idProduct}=="a017", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTR{idVendor}=="17ef", ATTR{idProduct}=="a024", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+
+# HID iface 5 on the same composite — required to prime the LED before vendor writes.
+# Without this, /dev/hidraw* can stay root:root; priming fails and HA color/power
+# commands are received but the ring never changes (usbfs reads still work).
+KERNEL=="hidraw*", ATTRS{idVendor}=="17ef", ATTRS{idProduct}=="a017", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="17ef", ATTRS{idProduct}=="a024", MODE="0660", GROUP="plugdev", TAG+="uaccess"
 
 # PIR sensor exposed via IIO (hid-sensor-prox) -- make sampling_frequency/raw
 # group-writable (its name is "prox").

@@ -1,16 +1,17 @@
 """Custom lnxlink module -- ThinkSmart Hub 500 audio volume.
 
-The built-in USB card (17ef:a017) DSP ignores UAC volume requests, so volume is a
-software attenuation handled by PipeWire/PulseAudio. This module drives the volume
-of that specific sink via pactl. Exposes:
+The built-in USB card (17ef:a017 or 17ef:a024) DSP ignores UAC volume requests, so
+volume is a software attenuation handled by PipeWire/PulseAudio. This module drives
+the volume of that specific sink via pactl. Exposes:
 
   - "Volume" : number 0-100 %
 
-Sink resolution is by USB **vendor:product id** (default 17ef:a017), read from the
-sink properties (device.vendor.id / device.product.id). This is immune to other
-generic "USB Audio" devices (docks, DACs, headsets) that would otherwise collide
-with a name-substring match. A `sink_match` name substring is kept only as an
-optional fallback for non-standard setups. Both are overridable via settings.
+Sink resolution is by USB **vendor:product id** (default: either a017 or a024),
+read from the sink properties (device.vendor.id / device.product.id). This is
+immune to other generic "USB Audio" devices (docks, DACs, headsets) that would
+otherwise collide with a name-substring match. A `sink_match` name substring is
+kept only as an optional fallback for non-standard setups. Both are overridable
+via settings.
 """
 import logging
 import re
@@ -29,8 +30,14 @@ class Addon:
         self.lnxlink = lnxlink
         settings = lnxlink.config.get("settings", {}).get("tsh500_volume", {})
         # Primary, conflict-proof match: the card's USB vendor:product id.
+        # When product_id is unset, accept either known Hub 500 id (a017 or a024; #1).
         self.vendor_id = str(settings.get("vendor_id", "17ef")).lower().removeprefix("0x")
-        self.product_id = str(settings.get("product_id", "a017")).lower().removeprefix("0x")
+        if "product_id" in settings and settings.get("product_id") not in (None, ""):
+            self.product_ids = (
+                str(settings.get("product_id")).lower().removeprefix("0x"),
+            )
+        else:
+            self.product_ids = ("a017", "a024")
         # Optional fallback: a substring of the PipeWire sink NAME. Disabled by
         # default ("") so a generic "USB Audio" dock/DAC can never be picked by
         # mistake -- set it only if the id match fails on your setup.
@@ -79,10 +86,10 @@ class Addon:
         for name, props in sinks:
             vid = props.get("device.vendor.id", "").lower().removeprefix("0x")
             pid = props.get("device.product.id", "").lower().removeprefix("0x")
-            if vid == self.vendor_id and pid == self.product_id:
+            if vid == self.vendor_id and pid in self.product_ids:
                 self.sink = name
                 logger.info("TSH500 Volume: sink resolved by id %s:%s -> %s",
-                            self.vendor_id, self.product_id, name)
+                            self.vendor_id, pid, name)
                 return self.sink
         # 2) optional fallback: name substring (only if explicitly configured).
         if self.sink_match:
@@ -94,7 +101,7 @@ class Addon:
                                 self.sink_match, name)
                     return self.sink
         logger.warning("TSH500 Volume: no sink for %s:%s (sink_match=%r)",
-                       self.vendor_id, self.product_id, self.sink_match)
+                       self.vendor_id, "/".join(self.product_ids), self.sink_match)
         return None
 
     @staticmethod

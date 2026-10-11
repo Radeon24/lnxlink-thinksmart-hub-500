@@ -13,7 +13,7 @@ four modules add the Hub-specific hardware on top.
 | **LED Color** | `select` (white/green/red) | same | reports last commanded state |
 | **Screen Power** | `switch` | DDC/CI `D6` (off = write-only 5) | DDC poll |
 | **Screen Brightness** | `number` 0-100 | DDC/CI VCP `0x10` | DDC poll |
-| **Volume** | `number` 0-100 % | PipeWire softvol on USB sink `17ef:a017` | pactl poll |
+| **Volume** | `number` 0-100 % | PipeWire softvol on USB sink `17ef:a017` or `a024` | pactl poll |
 | **Presence** | `binary_sensor` (occupancy) | PIR via IIO + 5 Hz background thread | continuous |
 
 > The LED has **no** brightness channel (hardware), hence only three colors + off.
@@ -64,8 +64,8 @@ Then:
 - Dependencies: `ddcutil`, `i2c-tools`, `pulseaudio-utils` (pactl), `pyusb`
   (installed by `install.sh`).
 - Device access without root: the udev rule grants the session user access to the
-  USB LED controller (`17ef:a017`) and the PIR IIO attributes; the user must be in
-  the `i2c` group for DDC.
+  USB LED controller (`17ef:a017` or `17ef:a024`), its **hidraw** node (LED priming),
+  and the PIR IIO attributes; the user must be in the `i2c` group for DDC.
 
 ## Per-module settings
 
@@ -89,10 +89,18 @@ Optional, under `settings:` in the lnxlink config (defaults shown in the snippet
   only sink is `auto_null` and no Hub sink exists. Add the user to `audio` for
   headless operation.
 - **Sink resolution is by USB id, not by name.** The module finds the sink whose
-  `device.vendor.id`/`device.product.id` properties match `17ef:a017`, so a generic
-  "USB Audio" dock/DAC/headset can never be picked by mistake. Inspect properties
-  with `pactl list sinks`. The optional `sink_match` (sink *name* substring) is a
-  fallback only and is empty by default.
+  `device.vendor.id`/`device.product.id` properties match `17ef:a017` or `a024`, so a
+  generic "USB Audio" dock/DAC/headset can never be picked by mistake. Inspect
+  properties with `pactl list sinks`. The optional `sink_match` (sink *name*
+  substring) is a fallback only and is empty by default.
+- **LED HID priming needs hidraw.** Vendor ep0 writes alone are not enough; the
+  module must send a HID Feature Report on interface 5 first. If `/dev/hidraw*`
+  for the composite is root-only, priming fails, MQTT/HA commands still arrive,
+  and the ring never changes. The udev rules cover hidraw for a017 and a024;
+  check `ls -l /dev/hidraw*` and lnxlink logs for `HID priming failed`.
+- **USB product ID variants.** The LED/audio composite is usually `17ef:a017`;
+  some Hub 500 units report `17ef:a024` with the same HID interface 5 layout
+  (see #1). LED and volume accept either ID; udev rules cover both.
 - Group changes (`i2c`/`plugdev`/`audio`) only apply to processes started after a new
   login of the user systemd manager — reboot (or `loginctl terminate-user`) to make
   them effective for the running lnxlink service. udev `uaccess`/ACL covers USB and

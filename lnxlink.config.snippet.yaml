@@ -18,9 +18,9 @@ settings:
   tsh500_volume:
     # The sink is found by its USB vendor:product id (read from the sink properties),
     # which is unique to the Hub card and cannot collide with a generic "USB Audio"
-    # dock/DAC/headset. Defaults below match the Hub 500; only change them if needed.
+    # dock/DAC/headset. When product_id is omitted, a017 and a024 are both accepted.
     vendor_id: "17ef"
-    product_id: "a017"
+    # product_id: "a017"   # optional; omit to accept a017 or a024
     # Optional fallback only -- a substring of the PipeWire sink NAME, used if the id
     # match fails. Left empty by default on purpose (an empty value never matches, so
     # no wrong device can be picked). Inspect names with: pactl list short sinks
